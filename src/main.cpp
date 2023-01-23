@@ -3,10 +3,15 @@
 #include "Arduino.h"
 #include "esp_task_wdt.h"
 #include <Adafruit_BME280.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <Adafruit_Sensor.h>
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <string>
+
+using namespace std;
 
 TaskHandle_t CPU0;
 TaskHandle_t CPU1;
@@ -25,6 +30,14 @@ CircularBuffer bmeHumidityBuffer(bufferSize);
 CircularBuffer bmePressureBuffer(bufferSize);
 CircularBuffer bmeAltitudeBuffer(bufferSize);
 
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS                                                         \
+  0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
 LCD_I2C lcd(0x3F, 20, 4);
 
 bool firstTime = false;
@@ -33,6 +46,8 @@ void setupLCD() {
   lcd.init();
   lcd.backlight();
 }
+
+void setupOLED() {}
 
 void resetBuffers() {
   for (int x = 0; x < bufferSize; x++) {
@@ -43,13 +58,28 @@ void resetBuffers() {
   }
 }
 
+float roundToOneDecima(float input) { return round(input * 10) / 10; };
+
 void loop0() { // read
 
   if (!firstTime) {
 
-    lcd.firstLine("Inicializando");
+    lcd.firstLine("Inicializando...");
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("Inicializando");
+    display.display();
 
-    delay(1000);
+    for (int i = 5; i > 0; i--) {
+
+      String text = "Aguarde " + String(i) + "s";
+
+      lcd.secondLine(text);
+
+      delay(1000);
+    }
 
     firstTime = true;
   }
@@ -59,16 +89,42 @@ void loop0() { // read
   float bmePressure = bmePressureBuffer.averageLast(bufferSize);
   float bmeAltitude = bmeAltitudeBuffer.averageLast(bufferSize);
 
+  bmePressure = (round(bmePressure * 10) / 10);
+  bmeAltitude = (round(bmeAltitude * 10) / 10);
+
   String firstLine =
       "T " + String(bmeTemperature) + "C H " + String(bmeHumidity);
   // +"%";
-  String secondLine = "P " + String(bmePressure) + " A " + String(bmeAltitude);
+  String secondLine =
+      "P " + String(bmePressure, 1) + "P A " + String(bmeAltitude, 1);
   // +"m";
 
   lcd.firstLine(firstLine);
   lcd.secondLine(secondLine);
 
-  delay(250);
+  // delay(751);
+
+  display.clearDisplay();
+
+  display.setTextSize(1.9);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("Temperat: " + String(bmeTemperature) + " C");
+  display.println("Humidity: " + String(bmeHumidity) + " %");
+  display.println("Pressure: " + String(bmePressure, 1) + " hPa");
+  display.println("Altitude: " + String(bmeAltitude, 1) + " m");
+
+  // display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); // Draw 'inverse' text
+  // display.println(3.141592);
+
+  // display.setTextSize(2); // Draw 2X-scale text
+  // display.setTextColor(SSD1306_WHITE);
+  // display.print(F("0x"));
+  // display.println(0xDEADBEEF, HEX);
+
+  display.display();
+
+  delay(751);
 
   // Serial.print("BME280  - Temperature = ");
   // Serial.print(bmeTemperaturebuffer.averageLast(bufferSize));
@@ -90,15 +146,14 @@ void loop0() { // read
 }
 
 void loop1() { // write
-  bmeTemperaturebuffer.pushElement(bme.readTemperature());
+  bmeTemperaturebuffer.pushElement(roundToOneDecima(bme.readTemperature()));
   bmeHumidityBuffer.pushElement(bme.readHumidity());
   bmePressureBuffer.pushElement(bme.readPressure() / 100.0F);
   bmeAltitudeBuffer.pushElement(bme.readAltitude(SEALEVELPRESSURE_HPA));
-  delay(5);
+  delay(47);
 }
 
 void runTask(int cpu) {
-  Serial.println(cpu);
   while (true) {
     if (cpu == 0) {
       loop0();
@@ -124,7 +179,15 @@ void setup() {
   setupLCD();
   resetBuffers();
 
-  Serial.println(F("BME280 test"));
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;)
+      ; // Don't proceed, loop forever
+  }
+
+  display.clearDisplay();
+  display.display();
+
   if (bme.begin(0x76) == false) {
     Serial.println("Could not find a valid BME280 sensor, check wiring!");
     while (1)
